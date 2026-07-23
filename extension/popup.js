@@ -116,6 +116,14 @@ function renderDone(result) {
     el.appendChild(
       paragraph(`Done. Removed ${result.removed}/${result.total} disliked tracks.`)
     );
+    if (result.skipped > 0) {
+      el.appendChild(
+        paragraph(
+          `${result.skipped} couldn't be removed automatically (YouTube Music's menu didn't respond in time). Try Scan again to retry, or remove those manually.`,
+          'muted'
+        )
+      );
+    }
     if (result.incomplete) {
       el.appendChild(
         paragraph(

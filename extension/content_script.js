@@ -32,9 +32,9 @@ function getRowInfo(row) {
   };
 }
 
-function getDislikedRows() {
+function getDislikedRows(skipSet) {
   return getRows().filter((row) => {
-    if (row.hasAttribute('data-purge-skip')) return false;
+    if (skipSet && skipSet.has(row)) return false;
     const btn = findButton(row, 'Dislike');
     return btn && btn.getAttribute('aria-pressed') === 'true';
   });
@@ -85,27 +85,58 @@ function closeAnyOpenMenu() {
   );
 }
 
-// Returns true if a track was removed, 'skip' if this row couldn't be
-// removed (and has been marked so it isn't retried), or false if there
-// was nothing to remove.
-async function removeOneDislikedRow() {
-  const rows = getDislikedRows();
+// A bare el.click() unreliably triggers YouTube Music's Material Design
+// buttons/menu items — observed in testing to sometimes silently do
+// nothing. Dispatching a full pointer/mouse sequence (as a real click
+// produces) plus a trailing click() is more reliable.
+function robustClick(el) {
+  const rect = el.getBoundingClientRect();
+  const opts = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    clientX: rect.x + rect.width / 2,
+    clientY: rect.y + rect.height / 2,
+    button: 0,
+  };
+  el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1, isPrimary: true }));
+  el.dispatchEvent(new MouseEvent('mousedown', opts));
+  el.dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerId: 1, isPrimary: true }));
+  el.dispatchEvent(new MouseEvent('mouseup', opts));
+  el.click();
+}
+
+// Returns true if a track was confirmed removed, 'skip' if this row
+// couldn't be removed this run (tracked only in skipSet, a plain Set of row
+// elements local to this removeAll() call — never written to the DOM, so
+// a failed row still shows up normally on the next Scan), or false if
+// there was nothing left to remove.
+async function removeOneDislikedRow(skipSet) {
+  const rows = getDislikedRows(skipSet);
   if (rows.length === 0) return false;
   const row = rows[0];
 
   const menuBtn = findButton(row, 'Action menu');
   if (!menuBtn) {
-    row.setAttribute('data-purge-skip', 'true');
+    skipSet.add(row);
     return 'skip';
   }
 
-  menuBtn.click();
-  const opened = await waitFor(
+  robustClick(menuBtn);
+  let opened = await waitFor(
     () => document.querySelector('tp-yt-iron-dropdown[opened]'),
-    4000
+    3000
   );
   if (!opened) {
-    row.setAttribute('data-purge-skip', 'true');
+    // The menu is occasionally slow to open — one retry before giving up.
+    robustClick(menuBtn);
+    opened = await waitFor(
+      () => document.querySelector('tp-yt-iron-dropdown[opened]'),
+      3000
+    );
+  }
+  if (!opened) {
+    skipSet.add(row);
     return 'skip';
   }
 
@@ -116,12 +147,17 @@ async function removeOneDislikedRow() {
 
   if (!removeItem) {
     closeAnyOpenMenu();
-    row.setAttribute('data-purge-skip', 'true');
+    skipSet.add(row);
     return 'skip';
   }
 
-  removeItem.click();
-  await waitFor(() => !document.body.contains(row), 4000);
+  robustClick(removeItem);
+  const removed = await waitFor(() => !document.body.contains(row), 4000);
+  if (!removed) {
+    closeAnyOpenMenu();
+    skipSet.add(row);
+    return 'skip';
+  }
   return true;
 }
 
@@ -141,19 +177,23 @@ async function scan() {
 async function removeAll(onProgress) {
   await loadAllRows();
   const expectedTotal = getExpectedTotal();
+  const skipSet = new Set();
   const total = getDislikedRows().length;
   const loadedTotal = getRows().length;
   let removed = 0;
+  let skipped = 0;
 
   while (true) {
-    const remaining = getDislikedRows().length;
+    const remaining = getDislikedRows(skipSet).length;
     if (remaining === 0) break;
 
-    const result = await removeOneDislikedRow();
+    const result = await removeOneDislikedRow(skipSet);
     if (result === true) {
       removed++;
       onProgress(removed, total);
-    } else if (result !== 'skip') {
+    } else if (result === 'skip') {
+      skipped++;
+    } else {
       break;
     }
 
@@ -163,6 +203,7 @@ async function removeAll(onProgress) {
   return {
     removed,
     total,
+    skipped,
     incomplete: expectedTotal !== null && loadedTotal < expectedTotal,
   };
 }
@@ -174,7 +215,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message.type === 'removeAll') {
     removeAll((removed, total) => {
-      chrome.runtime.sendMessage({ type: 'progress', removed, total });
+      chrome.runtime.sendMessage({ type: 'progress', removed, total }).catch(() => {});
     }).then(sendResponse);
     return true;
   }
