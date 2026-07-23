@@ -1,4 +1,4 @@
-name: _Users_gadelkareem_f_projects_youtubemusic_toolbox
+name: youtubemusic_toolbox
 channels:
   - defaults
 dependencies:
