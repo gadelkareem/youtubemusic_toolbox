@@ -1,50 +1,33 @@
 # youtubemusic_toolbox
 
-Small tools for managing YouTube Music playlists via [ytmusicapi](https://github.com/sigma67/ytmusicapi)
-— no browser extension, no untrusted third-party JS running against your Google session.
+A Chrome extension that removes thumbs-downed tracks from a YouTube Music
+playlist. It drives the actual `music.youtube.com` UI in your already-logged-in
+tab — no header copying, no separate auth file, no API keys.
 
-## Setup
+## Install
 
-```bash
-conda env create -f environment.yml
-conda activate youtubemusic_toolbox
-```
+1. Go to `chrome://extensions`.
+2. Enable **Developer mode** (top-right toggle).
+3. Click **Load unpacked** and select the `extension/` folder from this repo.
 
-### Authenticate (one-time)
+## Use
 
-1. Open `music.youtube.com` in Chrome, logged in.
-2. DevTools (F12) → Network tab → reload the page → filter for `browse`.
-3. Click any matching request → Headers tab → Request Headers section.
-4. Copy everything from `accept: */*` to the end of that section.
-5. Run:
-   ```bash
-   ytmusicapi browser
-   ```
-   Paste the copied headers when prompted. This writes `browser.json` to the
-   project root.
+1. Open the playlist you want to clean up on `music.youtube.com`.
+2. Click the extension's icon in the toolbar.
+3. Click **Scan for disliked tracks** — this scrolls through the whole
+   playlist (may take a bit for large ones) and lists every track marked
+   thumbs-down.
+4. Review the list, then click **Remove all N**. Keep the popup open until
+   it reports "Done" — closing it mid-removal stops the live progress
+   updates (the removal itself keeps running in the tab, but you'll lose
+   the progress display).
 
-**`browser.json` contains live session credentials for your Google account.
-It is git-ignored — never commit it, especially since this repo is public.**
-Credentials stay valid ~2 years unless you log out of that browser session.
+Scoped to the playlist you have open — it doesn't touch other playlists.
+Removal isn't undoable, so review the scanned list before confirming.
 
-## Scripts
+## How it works
 
-### `remove_disliked_ytmusic.py`
-
-Finds every track marked thumbs-down (`likeStatus == DISLIKE`) in a given
-playlist and removes them.
-
-```bash
-# Dry run first — always. Lists what WOULD be removed, changes nothing.
-python remove_disliked_ytmusic.py PLAYLIST_ID
-
-# Actually remove them once the dry-run list looks right.
-python remove_disliked_ytmusic.py PLAYLIST_ID --execute
-```
-
-`PLAYLIST_ID` is the `list=` value from the playlist's URL, e.g.
-`https://music.youtube.com/playlist?list=PL1234567890` → `PL1234567890`.
-
-Note: YouTube Music's special "Liked Music" auto-playlist (`LM`) has known
-quirks with item removal via the API. This is intended for normal, owned
-playlists.
+The extension has no special API access — it clicks the same "Action
+menu → Remove from playlist" control you'd click by hand, for every row
+whose Dislike button is pressed. This means it only breaks if YouTube
+Music's UI changes, not if Google's internal API does.
