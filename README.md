@@ -1,8 +1,8 @@
 # youtubemusic_toolbox
 
 A Chrome extension that removes thumbs-downed tracks from a YouTube Music
-playlist. It drives the actual `music.youtube.com` UI in your already-logged-in
-tab — no header copying, no separate auth file, no API keys.
+playlist, using your already-logged-in `music.youtube.com` session — no
+header copying, no separate auth file, no API keys to manage.
 
 ## Install
 
@@ -27,7 +27,15 @@ Removal isn't undoable, so review the scanned list before confirming.
 
 ## How it works
 
-The extension has no special API access — it clicks the same "Action
-menu → Remove from playlist" control you'd click by hand, for every row
-whose Dislike button is pressed. This means it only breaks if YouTube
-Music's UI changes, not if Google's internal API does.
+Scanning reads track state straight off the page's own rendered rows (the
+same Dislike button state you see). Removal calls YouTube Music's internal
+API directly — the same request its own "Remove from playlist" button
+sends — authenticated by computing the same session-hash scheme
+(`SAPISIDHASH`) the site's own web client uses, from the session cookie
+already in your tab. Nothing is copied or stored anywhere; it's computed
+fresh per request.
+
+An earlier version tried to drive the real UI (clicking each row's menu).
+That broke because the row's action menu only opens on genuine mouse
+`:hover`, a state no content script can fake — so it's now a direct API
+call instead.

@@ -3,12 +3,19 @@
   "name": "YT Music Dislike Purger",
   "version": "1.0.0",
   "description": "Scan a YouTube Music playlist for thumbs-down tracks and remove them.",
+  "minimum_chrome_version": "111",
   "permissions": ["activeTab"],
   "action": {
     "default_popup": "popup.html",
     "default_title": "YT Music Dislike Purger"
   },
   "content_scripts": [
+    {
+      "matches": ["https://music.youtube.com/playlist*"],
+      "js": ["page_bridge.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
     {
       "matches": ["https://music.youtube.com/playlist*"],
       "js": ["content_script.js"],

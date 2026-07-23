@@ -119,7 +119,7 @@ function renderDone(result) {
     if (result.skipped > 0) {
       el.appendChild(
         paragraph(
-          `${result.skipped} couldn't be removed automatically (YouTube Music's menu didn't respond in time). Try Scan again to retry, or remove those manually.`,
+          `${result.skipped} couldn't be removed (the request failed). Try Scan again to retry, or remove those manually.`,
           'muted'
         )
       );

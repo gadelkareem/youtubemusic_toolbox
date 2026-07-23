@@ -5,15 +5,6 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitFor(predicate, timeoutMs, intervalMs = 100) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (predicate()) return true;
-    await sleep(intervalMs);
-  }
-  return false;
-}
-
 function getRows() {
   return Array.from(document.querySelectorAll(ROW_SELECTOR));
 }
@@ -24,17 +15,24 @@ function findButton(row, ariaLabel) {
   ).find((b) => (b.getAttribute('aria-label') || '') === ariaLabel);
 }
 
+// videoId/setVideoId come straight off the row's own Polymer data object —
+// the same identifiers YouTube Music's own UI uses to build its remove
+// request. setVideoId is the one that's unique per playlist *entry*; a
+// playlist can contain the same song (same videoId) more than once, so
+// videoId alone is never enough to identify which row to act on.
 function getRowInfo(row) {
   const strings = row.querySelectorAll('yt-formatted-string.complex-string');
+  const item = row.data && row.data.playlistItemData;
   return {
     title: strings[0] ? strings[0].textContent.trim() : '(unknown title)',
     artist: strings[1] ? strings[1].textContent.trim() : '',
+    videoId: item ? item.videoId : null,
+    setVideoId: item ? item.playlistSetVideoId : null,
   };
 }
 
-function getDislikedRows(skipSet) {
+function getDislikedRows() {
   return getRows().filter((row) => {
-    if (skipSet && skipSet.has(row)) return false;
     const btn = findButton(row, 'Dislike');
     return btn && btn.getAttribute('aria-pressed') === 'true';
   });
@@ -79,86 +77,94 @@ function getExpectedTotal() {
   return match ? parseInt(match[1].replace(/,/g, ''), 10) : null;
 }
 
-function closeAnyOpenMenu() {
-  document.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
-  );
+function getPlaylistId() {
+  const match = location.search.match(/[?&]list=([^&]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
-// A bare el.click() unreliably triggers YouTube Music's Material Design
-// buttons/menu items — observed in testing to sometimes silently do
-// nothing. Dispatching a full pointer/mouse sequence (as a real click
-// produces) plus a trailing click() is more reliable.
-function robustClick(el) {
-  const rect = el.getBoundingClientRect();
-  const opts = {
-    bubbles: true,
-    cancelable: true,
-    composed: true,
-    clientX: rect.x + rect.width / 2,
-    clientY: rect.y + rect.height / 2,
-    button: 0,
-  };
-  el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1, isPrimary: true }));
-  el.dispatchEvent(new MouseEvent('mousedown', opts));
-  el.dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerId: 1, isPrimary: true }));
-  el.dispatchEvent(new MouseEvent('mouseup', opts));
-  el.click();
-}
-
-// Returns true if a track was confirmed removed, 'skip' if this row
-// couldn't be removed this run (tracked only in skipSet, a plain Set of row
-// elements local to this removeAll() call — never written to the DOM, so
-// a failed row still shows up normally on the next Scan), or false if
-// there was nothing left to remove.
-async function removeOneDislikedRow(skipSet) {
-  const rows = getDislikedRows(skipSet);
-  if (rows.length === 0) return false;
-  const row = rows[0];
-
-  const menuBtn = findButton(row, 'Action menu');
-  if (!menuBtn) {
-    skipSet.add(row);
-    return 'skip';
-  }
-
-  robustClick(menuBtn);
-  let opened = await waitFor(
-    () => document.querySelector('tp-yt-iron-dropdown[opened]'),
-    3000
-  );
-  if (!opened) {
-    // The menu is occasionally slow to open — one retry before giving up.
-    robustClick(menuBtn);
-    opened = await waitFor(
-      () => document.querySelector('tp-yt-iron-dropdown[opened]'),
-      3000
+// page_bridge.js (a MAIN-world content script) publishes these; this script
+// runs isolated and has no direct access to the page's own ytcfg global.
+async function getInnertubeContext() {
+  for (let i = 0; i < 50; i++) {
+    const raw = document.documentElement.getAttribute(
+      'data-ytmt-innertube-context'
     );
+    if (raw) return JSON.parse(raw);
+    await sleep(100);
   }
-  if (!opened) {
-    skipSet.add(row);
-    return 'skip';
-  }
+  throw new Error('Could not read YouTube Music client context');
+}
 
-  const dropdown = document.querySelector('tp-yt-iron-dropdown[opened]');
-  const removeItem = Array.from(
-    dropdown.querySelectorAll('ytmusic-menu-service-item-renderer')
-  ).find((el) => el.textContent.trim() === 'Remove from playlist');
+// Same SAPISIDHASH scheme ytmusicapi's browser-auth mode uses, computed
+// fresh per request (it's timestamp-bound) from the session cookie already
+// in this tab — no header copy-paste needed.
+async function getAuthHeader() {
+  const sapisid = document.cookie
+    .split('; ')
+    .find((c) => c.startsWith('SAPISID='))
+    ?.split('=')[1];
+  if (!sapisid) throw new Error('Not logged in to YouTube Music (no SAPISID cookie)');
+  const origin = 'https://music.youtube.com';
+  const timestamp = Math.floor(Date.now() / 1000);
+  const digest = await crypto.subtle.digest(
+    'SHA-1',
+    new TextEncoder().encode(`${timestamp} ${sapisid} ${origin}`)
+  );
+  const hash = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  return `SAPISIDHASH ${timestamp}_${hash}`;
+}
 
-  if (!removeItem) {
-    closeAnyOpenMenu();
-    skipSet.add(row);
-    return 'skip';
-  }
+// Removes one playlist entry via YouTube Music's own internal API — the
+// same request its "Remove from playlist" button sends. This replaced an
+// earlier approach that drove the real UI (clicking the row's menu): that
+// row action menu only opens on genuine mouse :hover, a browser-engine
+// state no content script can fake, so clicks on it were unreliable.
+async function removeTrackViaApi(videoId, setVideoId) {
+  const ctx = await getInnertubeContext();
+  const auth = await getAuthHeader();
+  const playlistId = getPlaylistId();
 
-  robustClick(removeItem);
-  const removed = await waitFor(() => !document.body.contains(row), 4000);
-  if (!removed) {
-    closeAnyOpenMenu();
-    skipSet.add(row);
-    return 'skip';
+  const response = await fetch(
+    'https://music.youtube.com/youtubei/v1/browse/edit_playlist?prettyPrint=false',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: auth,
+        'X-Goog-AuthUser': ctx.authuser,
+        'X-Goog-Visitor-Id': ctx.visitorData,
+        'X-Origin': 'https://music.youtube.com',
+        'X-Youtube-Client-Name': '67',
+        'X-Youtube-Client-Version': ctx.clientVersion,
+      },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: ctx.clientName,
+            clientVersion: ctx.clientVersion,
+            hl: 'en',
+            gl: 'US',
+          },
+        },
+        actions: [
+          {
+            setVideoId,
+            action: 'ACTION_REMOVE_VIDEO',
+            removedVideoId: videoId,
+          },
+        ],
+        playlistId,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Remove request failed: HTTP ${response.status}`);
   }
-  return true;
+  const data = await response.json();
+  return data.status === 'STATUS_SUCCEEDED';
 }
 
 async function scan() {
@@ -177,27 +183,33 @@ async function scan() {
 async function removeAll(onProgress) {
   await loadAllRows();
   const expectedTotal = getExpectedTotal();
-  const skipSet = new Set();
-  const total = getDislikedRows().length;
   const loadedTotal = getRows().length;
+  const targets = getDislikedRows().map((row) => ({ row, ...getRowInfo(row) }));
+  const total = targets.length;
   let removed = 0;
   let skipped = 0;
 
-  while (true) {
-    const remaining = getDislikedRows(skipSet).length;
-    if (remaining === 0) break;
-
-    const result = await removeOneDislikedRow(skipSet);
-    if (result === true) {
-      removed++;
-      onProgress(removed, total);
-    } else if (result === 'skip') {
+  for (const track of targets) {
+    if (!track.videoId || !track.setVideoId) {
       skipped++;
-    } else {
-      break;
+      continue;
     }
-
-    await sleep(400 + Math.floor(Math.random() * 400));
+    try {
+      const ok = await removeTrackViaApi(track.videoId, track.setVideoId);
+      if (ok) {
+        removed++;
+        // The API call bypasses YT Music's own UI, so the row won't
+        // disappear on its own — remove it here to keep the visible list
+        // in sync with what actually happened.
+        track.row.remove();
+        onProgress(removed, total);
+      } else {
+        skipped++;
+      }
+    } catch (e) {
+      skipped++;
+    }
+    await sleep(300 + Math.floor(Math.random() * 300));
   }
 
   return {
