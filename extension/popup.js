@@ -119,10 +119,13 @@ function renderDone(result) {
     if (result.skipped > 0) {
       el.appendChild(
         paragraph(
-          `${result.skipped} couldn't be removed (the request failed). Try Scan again to retry, or remove those manually.`,
+          `${result.skipped} couldn't be removed. Try Scan again to retry, or remove those manually.`,
           'muted'
         )
       );
+      if (result.lastError) {
+        el.appendChild(paragraph(`Error: ${result.lastError}`, 'muted'));
+      }
     }
     if (result.incomplete) {
       el.appendChild(

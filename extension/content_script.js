@@ -161,7 +161,11 @@ async function removeTrackViaApi(videoId, setVideoId) {
   );
 
   if (!response.ok) {
-    throw new Error(`Remove request failed: HTTP ${response.status}`);
+    let bodySnippet = '';
+    try {
+      bodySnippet = (await response.text()).slice(0, 200);
+    } catch (e) {}
+    throw new Error(`HTTP ${response.status}${bodySnippet ? ': ' + bodySnippet : ''}`);
   }
   const data = await response.json();
   return data.status === 'STATUS_SUCCEEDED';
@@ -188,10 +192,12 @@ async function removeAll(onProgress) {
   const total = targets.length;
   let removed = 0;
   let skipped = 0;
+  let lastError = null;
 
   for (const track of targets) {
     if (!track.videoId || !track.setVideoId) {
       skipped++;
+      lastError = 'Row had no videoId/setVideoId (unexpected DOM shape)';
       continue;
     }
     try {
@@ -205,9 +211,11 @@ async function removeAll(onProgress) {
         onProgress(removed, total);
       } else {
         skipped++;
+        lastError = 'API responded but status was not STATUS_SUCCEEDED';
       }
     } catch (e) {
       skipped++;
+      lastError = e && e.message ? e.message : String(e);
     }
     await sleep(300 + Math.floor(Math.random() * 300));
   }
@@ -216,6 +224,7 @@ async function removeAll(onProgress) {
     removed,
     total,
     skipped,
+    lastError,
     incomplete: expectedTotal !== null && loadedTotal < expectedTotal,
   };
 }
