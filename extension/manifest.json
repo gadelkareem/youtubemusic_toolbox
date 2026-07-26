@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "YT Music Dislike Purger",
+  "name": "YouTube Music Toolbox",
   "version": "1.0.0",
-  "description": "Scan a YouTube Music playlist for thumbs-down tracks and remove them.",
+  "description": "Remove thumbs-down tracks from a YouTube Music playlist, and move liked tracks to the top.",
   "minimum_chrome_version": "111",
   "permissions": ["activeTab"],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "YT Music Dislike Purger"
+    "default_title": "YouTube Music Toolbox"
   },
   "content_scripts": [
     {

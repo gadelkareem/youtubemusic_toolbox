@@ -1,8 +1,9 @@
 # youtubemusic_toolbox
 
-A Chrome extension that removes thumbs-downed tracks from a YouTube Music
-playlist, using your already-logged-in `music.youtube.com` session — no
-header copying, no separate auth file, no API keys to manage.
+A Chrome extension for YouTube Music playlists: removes thumbs-down tracks,
+and moves liked tracks to the top — using your already-logged-in
+`music.youtube.com` session, no header copying, no separate auth file, no
+API keys to manage.
 
 ## Install
 
@@ -22,18 +23,22 @@ header copying, no separate auth file, no API keys to manage.
    updates (the removal itself keeps running in the tab, but you'll lose
    the progress display).
 
+Or click **Sort liked tracks to top** to move every thumbs-up track to the
+front of the playlist. Everything else (liked and not) keeps its existing
+relative order — this is a stable partition, not a full re-sort.
+
 Scoped to the playlist you have open — it doesn't touch other playlists.
-Removal isn't undoable, so review the scanned list before confirming.
+Neither action is undoable, so review before confirming.
 
 ## How it works
 
 Scanning reads track state straight off the page's own rendered rows (the
-same Dislike button state you see). Removal calls YouTube Music's internal
-API directly — the same request its own "Remove from playlist" button
-sends — authenticated by computing the same session-hash scheme
-(`SAPISIDHASH`) the site's own web client uses, from the session cookie
-already in your tab. Nothing is copied or stored anywhere; it's computed
-fresh per request.
+same Dislike/Like button state you see). Removal and reordering both call
+YouTube Music's internal API directly — the same requests its own "Remove
+from playlist" button and drag-to-reorder send — authenticated by
+computing the same session-hash scheme (`SAPISIDHASH`) the site's own web
+client uses, from the session cookie already in your tab. Nothing is
+copied or stored anywhere; it's computed fresh per request.
 
 An earlier version tried to drive the real UI (clicking each row's menu).
 That broke because the row's action menu only opens on genuine mouse

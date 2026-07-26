@@ -3,6 +3,7 @@ const nameEl = document.getElementById('playlist-name');
 
 let currentTabId = null;
 let scanResult = null;
+let likedScanResult = null;
 
 function render(build) {
   contentEl.innerHTML = '';
@@ -23,9 +24,16 @@ function paragraph(text, className) {
   return p;
 }
 
+function divider() {
+  const hr = document.createElement('hr');
+  return hr;
+}
+
 function renderIdle() {
   render((el) => {
     el.appendChild(button('Scan for disliked tracks', onScanClick));
+    el.appendChild(divider());
+    el.appendChild(button('Sort liked tracks to top', onScanLikedClick));
   });
 }
 
@@ -41,7 +49,7 @@ function renderNotOnPlaylist() {
   });
 }
 
-function renderConnectionError() {
+function renderConnectionError(retryFn) {
   render((el) => {
     el.appendChild(
       paragraph(
@@ -49,7 +57,7 @@ function renderConnectionError() {
         'muted'
       )
     );
-    el.appendChild(button('Retry scan', onScanClick));
+    el.appendChild(button('Retry', retryFn));
   });
 }
 
@@ -139,6 +147,61 @@ function renderDone(result) {
   });
 }
 
+function renderLikedScanned(result) {
+  render((el) => {
+    if (result.likedCount === 0) {
+      el.appendChild(
+        paragraph(`No liked tracks found out of ${result.total} tracks.`)
+      );
+      renderIncompleteWarning(el, result);
+      el.appendChild(button('Scan again', onScanLikedClick));
+      return;
+    }
+
+    el.appendChild(
+      paragraph(
+        `Found ${result.likedCount} liked out of ${result.total} tracks. Move them to the top (keeping everything else in its current order)?`
+      )
+    );
+    renderIncompleteWarning(el, result);
+    el.appendChild(button(`Move ${result.likedCount} liked tracks to top`, onSortConfirmClick));
+    el.appendChild(paragraph('Keep this popup open until sorting finishes.', 'muted'));
+  });
+}
+
+function renderSorting(moved, total) {
+  render((el) => {
+    el.appendChild(paragraph(`Sorting… ${moved}/${total} moves made`));
+    el.appendChild(paragraph('Keep this popup open until sorting finishes.', 'muted'));
+  });
+}
+
+function renderSortDone(result) {
+  render((el) => {
+    el.appendChild(paragraph(`Done. Made ${result.moved}/${result.total} moves.`));
+    if (result.skipped > 0) {
+      el.appendChild(
+        paragraph(
+          `${result.skipped} moves failed. Try again, or finish reordering those manually.`,
+          'muted'
+        )
+      );
+      if (result.lastError) {
+        el.appendChild(paragraph(`Error: ${result.lastError}`, 'muted'));
+      }
+    }
+    if (result.incomplete) {
+      el.appendChild(
+        paragraph(
+          'The playlist may not have fully loaded, so tracks further down may not have been included. Scroll to the bottom yourself and try again to check.',
+          'muted'
+        )
+      );
+    }
+    el.appendChild(button('Sort again', onScanLikedClick));
+  });
+}
+
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab;
@@ -150,7 +213,7 @@ async function onScanClick() {
     scanResult = await chrome.tabs.sendMessage(currentTabId, { type: 'scan' });
     renderScanned(scanResult);
   } catch (err) {
-    renderConnectionError();
+    renderConnectionError(onScanClick);
   }
 }
 
@@ -171,7 +234,40 @@ async function onRemoveAllClick() {
     });
     renderDone(result);
   } catch (err) {
-    renderConnectionError();
+    renderConnectionError(onScanClick);
+  } finally {
+    chrome.runtime.onMessage.removeListener(progressListener);
+  }
+}
+
+async function onScanLikedClick() {
+  renderScanning();
+  try {
+    likedScanResult = await chrome.tabs.sendMessage(currentTabId, { type: 'scanLiked' });
+    renderLikedScanned(likedScanResult);
+  } catch (err) {
+    renderConnectionError(onScanLikedClick);
+  }
+}
+
+async function onSortConfirmClick() {
+  const expectedTotal = likedScanResult.likedCount;
+  renderSorting(0, expectedTotal);
+
+  const progressListener = (message) => {
+    if (message.type === 'sortProgress') {
+      renderSorting(message.moved, message.total);
+    }
+  };
+  chrome.runtime.onMessage.addListener(progressListener);
+
+  try {
+    const result = await chrome.tabs.sendMessage(currentTabId, {
+      type: 'sortLikedToTop',
+    });
+    renderSortDone(result);
+  } catch (err) {
+    renderConnectionError(onScanLikedClick);
   } finally {
     chrome.runtime.onMessage.removeListener(progressListener);
   }

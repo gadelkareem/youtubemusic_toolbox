@@ -1,0 +1,10 @@
+name: youtubemusic_toolbox
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - playwright==1.57.0
+      - playwright-stealth==2.0.0

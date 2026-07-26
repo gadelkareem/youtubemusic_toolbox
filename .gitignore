@@ -1,2 +1,7 @@
 # OS
 .DS_Store
+
+# Local test-only Chrome profile data (copied session/cookies) -- never commit
+test/.chrome-profile-copy/
+test/.chrome-profile/
+
